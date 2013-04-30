@@ -81,10 +81,10 @@ class Node
   end
 
   def has_diagonal_forced(position, dx, dy, grid)
-    return true if grid.blocked?(Vector2.new(position.x+1, position.y)) && !grid.blocked?(Vector2.new(position.x, position.y + dy))
-    return true if grid.blocked?(Vector2.new(position.x-1, position.y)) && !grid.blocked?(Vector2.new(position.x, position.y + dy))
-    return true if grid.blocked?(Vector2.new(position.x, position.y+1)) && !grid.blocked?(Vector2.new(position.x + dx, position.y))
-    return true if grid.blocked?(Vector2.new(position.x, position.y-1)) && !grid.blocked?(Vector2.new(position.x + dx, position.y))
+    return true if grid.blocked?(Vector2.new(position.x+1, position.y)) && !grid.blocked?(Vector2.new(position.x, position.y + dy)) && !grid.blocked?(Vector2.new(position.x+1, position.y + dy))
+    return true if grid.blocked?(Vector2.new(position.x-1, position.y)) && !grid.blocked?(Vector2.new(position.x, position.y + dy)) && !grid.blocked?(Vector2.new(position.x-1, position.y + dy))
+    return true if grid.blocked?(Vector2.new(position.x, position.y+1)) && !grid.blocked?(Vector2.new(position.x + dx, position.y)) && !grid.blocked?(Vector2.new(position.x + dx, position.y+1))
+    return true if grid.blocked?(Vector2.new(position.x, position.y-1)) && !grid.blocked?(Vector2.new(position.x + dx, position.y)) && !grid.blocked?(Vector2.new(position.x + dx, position.y-1))
     false
   end
 
