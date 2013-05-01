@@ -13,7 +13,7 @@ class Vector2
   def direction(other)
     return :diagonal if other.x != x && other.y != y
     return :horizontal if other.x != x && other.y == y
-    return :verticle if other.x == x && other.y != y
+    return :vertical if other.x == x && other.y != y
     return :none
   end
 

@@ -15,15 +15,38 @@ end
 class Node
   attr_accessor :position, :parent, :target
 
-  @@ADJACENT_MAP = { -1 => { -1 => [2, 3, 4],
-                              0 => [4],
-                              1 => [4, 5, 6] },
-                      0 => { -1 => [2],
-                              0 => [],
-                              1 => [6] },
-                      1 => { -1 => [0, 1, 2],
-                              0 => [0],
-                              1 => [0, 6, 7] } }
+  @@NATURAL_SEARCH_DIRECTIONS_MAP = { -1 => { -1 => [2, 3, 4],
+                                               0 => [4],
+                                               1 => [4, 5, 6] },
+                                       0 => { -1 => [2],
+                                               0 => [],
+                                               1 => [6] },
+                                       1 => { -1 => [0, 1, 2],
+                                               0 => [0],
+                                               1 => [0, 6, 7] } }
+
+  def self.find_jump_point(parent, position, target, grid)
+    node = Node.new(position, parent, target)
+    return nil if grid.blocked?(node.position)
+    return node if node.position == target
+
+    if node.direction_from_parent == :diagonal
+      return node if node.has_diagonal_forced?(grid)
+
+      if !Node.find_jump_point(node, Vector2.new(node.position.x + node.parent_dx, node.position.y), target, grid).nil? ||
+         !Node.find_jump_point(node, Vector2.new(node.position.x, node.position.y + node.parent_dy), target, grid).nil?
+        return node
+      end
+    elsif node.direction_from_parent == :horizontal
+      return node if node.has_horizontal_forced?(grid)
+    else # Vertical
+      return node if node.has_vertical_forced?(grid)
+    end
+
+    # This node is not a jump point, continue along the path.
+    next_position = Vector2.new(node.position.x + node.parent_dx, node.position.y + node.parent_dy)
+    Node.find_jump_point(parent, next_position, target, grid)
+  end
 
   def initialize(position, parent, target)
     @position = position
@@ -34,17 +57,16 @@ class Node
   def calculate_scores
     @h_score = ((target.x - position.x).abs + (target.y - position.y).abs) * 10
 
-    if parent.nil?
+    if @parent.nil?
       @g_score = 0
       @f_score = @h_score
     else
-      direction = position.direction(parent.position)
-      if direction == :diagonal
-        @g_score = parent.G + 14 * (parent.position.x - @position.x).abs
-      elsif direction == :horizontal
-        @g_score = parent.G + 10 * (parent.position.x - @position.x).abs
+      if direction_from_parent == :diagonal
+        @g_score = @parent.G + 14 * (@parent.position.x - @position.x).abs
+      elsif direction_from_parent == :horizontal
+        @g_score = @parent.G + 10 * (@parent.position.x - @position.x).abs
       else
-        @g_score = parent.G + 10 * (parent.position.y - @position.y).abs
+        @g_score = @parent.G + 10 * (@parent.position.y - @position.y).abs
       end
 
       @f_score = @h_score + @g_score
@@ -52,11 +74,15 @@ class Node
   end
 
   def parent_dx
-    MathHelper.sign(@position.x - @parent.position.x)
+    @parent_dx ||= MathHelper.sign(@position.x - @parent.position.x)
   end
 
   def parent_dy
-    MathHelper.sign(@position.y - @parent.position.y)
+    @parent_dy ||= MathHelper.sign(@position.y - @parent.position.y)
+  end
+
+  def direction_from_parent
+    @parent_direction ||= @position.direction(@parent.position)
   end
 
   def adjacent
@@ -68,10 +94,14 @@ class Node
               Vector2.new(@position.x-1, @position.y+1),
               Vector2.new(@position.x, @position.y+1),
               Vector2.new(@position.x+1, @position.y+1)]
-    return points if @parent.nil?
-    result = []
+  end
 
-    @@ADJACENT_MAP[parent_dx][parent_dy].each { |i| result << points[i] }
+  def natural_search_directions
+    points = adjacent
+    return points if @parent.nil?
+
+    result = []
+    @@NATURAL_SEARCH_DIRECTIONS_MAP[parent_dx][parent_dy].each { |i| result << points[i] }
     result
   end
 
@@ -79,26 +109,23 @@ class Node
     successors = []
 
     # Find naturals
-    adjacent.each do |node|
-      dx = node.x - @position.x
-      dy = node.y - @position.y
-      jump_point = find_jump_point(@position.x, @position.y, dx, dy, target, grid)
-      successors << Node.new(jump_point, self, target) if jump_point
+    natural_search_directions.each do |direction|
+      jump_point = Node.find_jump_point(self, direction, target, grid)
+      successors << jump_point if jump_point
     end
 
     # Find Forced
     unless parent.nil?
-      direction = position.direction(@parent.position)
-      if direction == :diagonal
-        diagonal_forced(@position, parent_dx, parent_dy, grid).each do |point|
+      if direction_from_parent == :diagonal
+        diagonal_forced(grid).each do |point|
           successors << Node.new(point, self, target)
         end
-      elsif direction == :horizontal
-        horizontal_forced(@position, parent_dx, grid).each do |point|
+      elsif direction_from_parent == :horizontal
+        horizontal_forced(grid).each do |point|
           successors << Node.new(point, self, target)
         end
       else
-        verticle_forced(@position, parent_dy, grid).each do |point|
+        vertical_forced(grid).each do |point|
           successors << Node.new(point, self, target)
         end
       end
@@ -107,69 +134,50 @@ class Node
     successors
   end
 
-  def find_jump_point(sx, sy, dx, dy, target, grid)
-    new_position = Vector2.new(sx + dx, sy + dy)
-    return nil if grid.blocked?(new_position)
-    return new_position if new_position == target
+  def diagonal_forced(grid)
+    dx = parent_dx
+    dy = parent_dy
 
-    if dx != 0 && dy != 0 # Diagonal case
-      if has_diagonal_forced(new_position, dx, dy, grid)
-        return new_position
-      end
-
-      if !find_jump_point(new_position.x, new_position.y, dx, 0, target, grid).nil? ||
-         !find_jump_point(new_position.x, new_position.y, 0, dy, target, grid).nil?
-        return new_position
-      end
-    elsif dx != 0 # Horizontal case
-      if has_horizontal_forced(new_position, dx, grid)
-        return new_position
-      end
-    else # Verticle case
-      if has_verticle_forced(new_position, dy, grid)
-        return new_position
-      end
-    end
-
-    # No jump point found, continue along the path.
-    find_jump_point(new_position.x, new_position.y, dx, dy, target, grid)
-  end
-
-  def diagonal_forced(position, dx, dy, grid)
     result = []
-    result << Vector2.new(position.x+1, position.y+dy) if grid.blocked?(Vector2.new(position.x+1, position.y)) && !grid.blocked?(Vector2.new(position.x, position.y + dy)) && !grid.blocked?(Vector2.new(position.x+1, position.y + dy))
-    result << Vector2.new(position.x-1, position.y+dy) if grid.blocked?(Vector2.new(position.x-1, position.y)) && !grid.blocked?(Vector2.new(position.x, position.y + dy)) && !grid.blocked?(Vector2.new(position.x-1, position.y + dy))
-    result << Vector2.new(position.x+dx, position.y+1) if grid.blocked?(Vector2.new(position.x, position.y+1)) && !grid.blocked?(Vector2.new(position.x + dx, position.y)) && !grid.blocked?(Vector2.new(position.x + dx, position.y+1))
-    result << Vector2.new(position.x+dx, position.y-1) if grid.blocked?(Vector2.new(position.x, position.y-1)) && !grid.blocked?(Vector2.new(position.x + dx, position.y)) && !grid.blocked?(Vector2.new(position.x + dx, position.y-1))
+    result << Vector2.new(@position.x+1, @position.y+dy) if grid.blocked?(Vector2.new(@position.x+1, @position.y)) && !grid.blocked?(Vector2.new(@position.x, @position.y + dy)) && !grid.blocked?(Vector2.new(@position.x+1, @position.y + dy))
+    result << Vector2.new(@position.x-1, @position.y+dy) if grid.blocked?(Vector2.new(@position.x-1, @position.y)) && !grid.blocked?(Vector2.new(@position.x, @position.y + dy)) && !grid.blocked?(Vector2.new(@position.x-1, @position.y + dy))
+    result << Vector2.new(@position.x+dx, @position.y+1) if grid.blocked?(Vector2.new(@position.x, @position.y+1)) && !grid.blocked?(Vector2.new(@position.x + dx, @position.y)) && !grid.blocked?(Vector2.new(@position.x + dx, @position.y+1))
+    result << Vector2.new(@position.x+dx, @position.y-1) if grid.blocked?(Vector2.new(@position.x, @position.y-1)) && !grid.blocked?(Vector2.new(@position.x + dx, @position.y)) && !grid.blocked?(Vector2.new(@position.x + dx, @position.y-1))
     result
   end
 
-  def has_diagonal_forced(position, dx, dy, grid)
-    !diagonal_forced(position, dx, dy, grid).empty?
-  end
+  def horizontal_forced(grid)
+    dx = parent_dx
+    dy = parent_dy
 
-  def horizontal_forced(position, dx, grid)
     result = []
-    return [] if grid.blocked?(Vector2.new(position.x + dx, position.y))
-    result << Vector2.new(position.x+dx, position.y+1) if grid.blocked?(Vector2.new(position.x, position.y + 1)) && !grid.blocked?(Vector2.new(position.x+dx, position.y+1))
-    result << Vector2.new(position.x+dx, position.y-1) if grid.blocked?(Vector2.new(position.x, position.y - 1)) && !grid.blocked?(Vector2.new(position.x+dx, position.y-1))
+    return [] if grid.blocked?(Vector2.new(@position.x + dx, @position.y))
+    result << Vector2.new(@position.x+dx, @position.y+1) if grid.blocked?(Vector2.new(@position.x, @position.y + 1)) && !grid.blocked?(Vector2.new(@position.x+dx, @position.y+1))
+    result << Vector2.new(@position.x+dx, @position.y-1) if grid.blocked?(Vector2.new(@position.x, @position.y - 1)) && !grid.blocked?(Vector2.new(@position.x+dx, @position.y-1))
     result
   end
 
-  def has_horizontal_forced(position, dx, grid)
-    !horizontal_forced(position, dx, grid).empty?
-  end
+  def vertical_forced(grid)
+    dx = parent_dx
+    dy = parent_dy
 
-  def verticle_forced(position, dy, grid)
     result = []
-    return [] if grid.blocked?(Vector2.new(position.x, position.y + dy))
-    result << Vector2.new(position.x+1, position.y+dy) if grid.blocked?(Vector2.new(position.x + 1, position.y)) && !grid.blocked?(Vector2.new(position.x+1, position.y+dy))
-    result << Vector2.new(position.x-1, position.y+dy) if grid.blocked?(Vector2.new(position.x - 1, position.y)) && !grid.blocked?(Vector2.new(position.x-1, position.y+dy))
+    return [] if grid.blocked?(Vector2.new(@position.x, @position.y + dy))
+    result << Vector2.new(@position.x+1, @position.y+dy) if grid.blocked?(Vector2.new(@position.x + 1, @position.y)) && !grid.blocked?(Vector2.new(@position.x+1, @position.y+dy))
+    result << Vector2.new(@position.x-1, @position.y+dy) if grid.blocked?(Vector2.new(@position.x - 1, @position.y)) && !grid.blocked?(Vector2.new(@position.x-1, @position.y+dy))
     result
   end
 
-  def has_verticle_forced(position, dy, grid)
-    !verticle_forced(position, dy, grid).empty?
+  def has_diagonal_forced?(grid)
+    !diagonal_forced(grid).empty?
+  end
+
+  def has_horizontal_forced?(grid)
+    !horizontal_forced(grid).empty?
+  end
+
+  def has_vertical_forced?(grid)
+    !vertical_forced(grid).empty?
   end
 
   def to_s
